@@ -7,48 +7,64 @@ const { staffRepo, routesRepo, registrationsRepo, allocationsRepo, todayStr } = 
  *  1. New staff (within their priority window)
  *  2. Highest daysSinceLastSeat (most days missed = highest priority)
  *  3. Tie-break: random shuffle (fair lottery)
- *
- * Process:
- *  - Get today's registrations (not withdrawn, staff not blocked)
- *  - Split by route preference
- *  - For each route, rank candidates by priority and assign seats
- *  - Staff who don't get a seat get daysSinceLastSeat incremented
- *  - Staff who get a seat get daysSinceLastSeat reset to 0
  */
 async function runAllocation() {
   const today = todayStr();
+  console.log(`[Allocation] Starting allocation for ${today}...`);
 
-  // Prevent double allocation
+  // Prevent double allocation — check DB directly
   const existingAlloc = await allocationsRepo.findByDate(today);
   if (existingAlloc.length > 0) {
+    console.log(`[Allocation] Already ran today (${existingAlloc.length} seats found). Skipping.`);
     return { alreadyRun: true, allocations: existingAlloc };
   }
 
+  // Get all active registrations for today
   const todayRegs = await registrationsRepo.findActiveByDate(today);
+  console.log(`[Allocation] Found ${todayRegs.length} registration(s) for today.`);
+
   if (todayRegs.length === 0) {
+    console.log('[Allocation] No registrations — nothing to allocate.');
     return { alreadyRun: false, allocations: [] };
   }
 
+  // Load routes and staff in parallel
   const [activeRoutes, allStaff] = await Promise.all([
     routesRepo.findActive(),
     staffRepo.findAll(),
   ]);
-  const staffById = new Map(allStaff.map((s) => [s.id, s]));
 
+  console.log(`[Allocation] Active routes: ${activeRoutes.length}, Total staff: ${allStaff.length}`);
+
+  if (activeRoutes.length === 0) {
+    console.log('[Allocation] No active routes configured — cannot allocate.');
+    return { alreadyRun: false, allocations: [] };
+  }
+
+  const staffById = new Map(allStaff.map((s) => [s.id, s]));
   const newAllocations = [];
-  const priorityUpdates = []; // batched write at the end
+  const priorityUpdates = [];
 
   for (const route of activeRoutes) {
     const routeRegs = todayRegs.filter((r) => r.routeId === route.id);
+    console.log(`[Allocation] Route "${route.name}": ${routeRegs.length} registrations, ${route.capacity} seats`);
+
     const candidates = routeRegs
       .map((reg) => {
         const staff = staffById.get(reg.staffId);
-        if (!staff || staff.isBlocked) return null;
+        if (!staff) {
+          console.warn(`[Allocation] Staff ${reg.staffId} not found — skipping`);
+          return null;
+        }
+        if (staff.isBlocked) {
+          console.log(`[Allocation] Staff ${staff.name} is blocked — skipping`);
+          return null;
+        }
         return { reg, staff };
       })
       .filter(Boolean);
 
-    // Sort by priority
+    // Sort by priority: new staff first, then days since last seat, then random
     candidates.sort((a, b) => {
       const aNew = isNewStaff(a.staff) ? 1 : 0;
       const bNew = isNewStaff(b.staff) ? 1 : 0;
@@ -73,22 +89,26 @@ async function runAllocation() {
           daysSinceLastSeat: 0,
           totalTrips: (c.staff.totalTrips || 0) + 1,
         });
+        console.log(`[Allocation] Seat ${String(idx + 1).padStart(2, '0')} → ${c.staff.name}`);
       } else {
         priorityUpdates.push({
           id: c.staff.id,
           daysSinceLastSeat: (c.staff.daysSinceLastSeat || 0) + 1,
           totalTrips: c.staff.totalTrips || 0,
         });
+        console.log(`[Allocation] No seat → ${c.staff.name} (priority score now ${(c.staff.daysSinceLastSeat || 0) + 1})`);
       }
     });
   }
 
+  // Write allocations and update priority scores in parallel
   const [inserted] = await Promise.all([
     allocationsRepo.bulkCreate(newAllocations),
     staffRepo.bulkUpdatePriority(priorityUpdates),
     staffRepo.unblockExpired(today),
   ]);
 
+  console.log(`[Allocation] Done. ${inserted.length} seat(s) assigned.`);
   return { alreadyRun: false, allocations: inserted };
 }
 
@@ -99,8 +119,8 @@ function isNewStaff(staff) {
 }
 
 /**
- * Build the full transparency report for a given date.
- * Returns every registered staff member with their seat (or NA).
+ * Full transparency report for a given date.
+ * Returns every registered staff member with their seat or NA.
  */
 async function buildTransparencyReport(date) {
   const day = date || todayStr();
@@ -110,6 +130,7 @@ async function buildTransparencyReport(date) {
     staffRepo.findAll(),
     routesRepo.findAll(),
   ]);
+
   const staffById = new Map(allStaff.map((s) => [s.id, s]));
   const routeById = new Map(allRoutes.map((r) => [r.id, r]));
 
