@@ -25,17 +25,36 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// function shouldRunNow() {
+//   const now = new Date();
+//   const hour = parseInt(process.env.ALLOCATION_HOUR || '15');
+//   const minute = parseInt(process.env.ALLOCATION_MINUTE || '30');
+
+//   // Only run on weekdays (Mon–Fri). Remove this check if you run on weekends.
+//   const dayOfWeek = now.getDay(); // 0 = Sunday, 6 = Saturday
+//   if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+
+//   // Has the allocation time passed today?
+//   const nowMinutes = now.getHours() * 60 + now.getMinutes();
+//   const targetMinutes = hour * 60 + minute;
+//   return nowMinutes >= targetMinutes;
+// }
+const LAGOS_OFFSET_MS = 60 * 60 * 1000;
+
+function nowInLagos() {
+  return new Date(Date.now() + LAGOS_OFFSET_MS);
+}
+
 function shouldRunNow() {
-  const now = new Date();
+  const lagosNow = nowInLagos();
   const hour = parseInt(process.env.ALLOCATION_HOUR || '15');
   const minute = parseInt(process.env.ALLOCATION_MINUTE || '30');
 
-  // Only run on weekdays (Mon–Fri). Remove this check if you run on weekends.
-  const dayOfWeek = now.getDay(); // 0 = Sunday, 6 = Saturday
-  if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+  // Only run on weekdays (Mon–Fri), based on Lagos day, not server day
+  // const dayOfWeek = lagosNow.getUTCDay(); // 0 = Sunday, 6 = Saturday
+  // if (dayOfWeek === 0 || dayOfWeek === 6) return false;
 
-  // Has the allocation time passed today?
-  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const nowMinutes = lagosNow.getUTCHours() * 60 + lagosNow.getUTCMinutes();
   const targetMinutes = hour * 60 + minute;
   return nowMinutes >= targetMinutes;
 }

@@ -5,22 +5,53 @@ const { buildTransparencyReport } = require('../services/allocation');
 
 const router = express.Router();
 
+// function getWindowTimes() {
+//   const now = new Date();
+//   const closeHour = parseInt(process.env.REGISTRATION_CLOSE_HOUR || '15');
+//   const closeMinute = parseInt(process.env.REGISTRATION_CLOSE_MINUTE || '30');
+//   const withdrawHour = parseInt(process.env.WITHDRAWAL_DEADLINE_HOUR || '14');
+//   const openHour = parseInt(process.env.REGISTRATION_OPEN_HOUR || '9');
+
+//   const openTime = new Date(); openTime.setHours(openHour, 0, 0, 0);
+//   const closeTime = new Date(); closeTime.setHours(closeHour, closeMinute, 0, 0);
+//   const withdrawTime = new Date(); withdrawTime.setHours(withdrawHour, 0, 0, 0);
+
+//   return {
+//     now, openTime, closeTime, withdrawTime,
+//     isOpen: now >= openTime && now < closeTime,
+//     canWithdraw: now < withdrawTime,
+//     isAllocated: now >= closeTime,
+//   };
+// }
+
+
+// Nigeria (WAT) is a fixed UTC+1 offset — it does not observe daylight saving time,
+// so this never needs to change. Computing it this way means booking windows work
+// correctly regardless of what timezone the hosting server (Render) is set to,
+// instead of depending on a TZ environment variable being remembered on every deploy.
+const LAGOS_OFFSET_MS = 60 * 60 * 1000;
+
+function nowInLagos() {
+  return new Date(Date.now() + LAGOS_OFFSET_MS);
+}
+
 function getWindowTimes() {
-  const now = new Date();
+  const lagosNow = nowInLagos();
+  const nowMinutes = lagosNow.getUTCHours() * 60 + lagosNow.getUTCMinutes();
+
   const closeHour = parseInt(process.env.REGISTRATION_CLOSE_HOUR || '15');
   const closeMinute = parseInt(process.env.REGISTRATION_CLOSE_MINUTE || '30');
   const withdrawHour = parseInt(process.env.WITHDRAWAL_DEADLINE_HOUR || '14');
   const openHour = parseInt(process.env.REGISTRATION_OPEN_HOUR || '9');
 
-  const openTime = new Date(); openTime.setHours(openHour, 0, 0, 0);
-  const closeTime = new Date(); closeTime.setHours(closeHour, closeMinute, 0, 0);
-  const withdrawTime = new Date(); withdrawTime.setHours(withdrawHour, 0, 0, 0);
+  const openMinutes = openHour * 60;
+  const closeMinutes = closeHour * 60 + closeMinute;
+  const withdrawMinutes = withdrawHour * 60;
 
   return {
-    now, openTime, closeTime, withdrawTime,
-    isOpen: now >= openTime && now < closeTime,
-    canWithdraw: now < withdrawTime,
-    isAllocated: now >= closeTime,
+    isOpen: nowMinutes >= openMinutes && nowMinutes < closeMinutes,
+    canWithdraw: nowMinutes < withdrawMinutes,
+    isAllocated: nowMinutes >= closeMinutes,
   };
 }
 
