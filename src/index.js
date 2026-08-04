@@ -31,13 +31,13 @@ const limiter = rateLimit({
 // Strict limiter on login to prevent brute force
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10,
+  max: 100,
   message: { error: 'Too many login attempts, please wait.' },
 });
 
 app.use('/api', limiter);
 app.use('/api/auth/login', loginLimiter);
-
+app.use('/api/auth/register', loginLimiter);
 // ─── Routes ──────────────────────────────────────────────────────────────────
 app.use('/api/auth', authRouter);
 app.use('/api/booking', bookingRouter);
